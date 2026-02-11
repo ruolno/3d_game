@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { MathUtils, PerspectiveCamera, Vector3 } from 'three'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'

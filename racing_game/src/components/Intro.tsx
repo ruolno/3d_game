@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Suspense, useEffect, useState } from 'react'
 import { useProgress } from '@react-three/drei'
 

@@ -3,10 +3,14 @@ import './App.css'
 // @ts-ignore
 import { Model } from "./components/Model.jsx"
 // @ts-ignore
+import { RemotePlayer } from "./components/RemotePlayer.jsx"
+// @ts-ignore
 import { CityScene } from "./components/CityScene.jsx"
+import { GameUI } from "./components/GameUI"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { Physics } from "@react-three/rapier"
 import * as THREE from 'three'
+import { useMultiplayer } from './hooks/useMultiplayer'
 
 type ModelRef = React.RefObject<THREE.Group | null>
 
@@ -17,8 +21,10 @@ function ThirdPersonCamera({ modelRef }: { modelRef: ModelRef }) {
   const smoothedCameraPosition = useRef(new THREE.Vector3())
   const smoothedCameraTarget = useRef(new THREE.Vector3())
   const raycaster = useRef(new THREE.Raycaster())
+  const frameCount = useRef(0)
   
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
+    frameCount.current++
     if (!modelRef.current) return
     
     // Get model's world position
@@ -38,50 +44,55 @@ function ThirdPersonCamera({ modelRef }: { modelRef: ModelRef }) {
     const desiredCameraPosition = new THREE.Vector3()
     desiredCameraPosition.copy(modelPosition).add(cameraOffset)
     
-    // Camera collision detection using raycast
-    // Cast a ray from the model to the desired camera position
-    const rayDirection = new THREE.Vector3()
-    rayDirection.subVectors(desiredCameraPosition, modelPosition).normalize()
-    const rayDistance = modelPosition.distanceTo(desiredCameraPosition)
-    
-    raycaster.current.set(modelPosition, rayDirection)
-    raycaster.current.far = rayDistance
-    
-    // Get all intersections with scene objects
-    const intersects = raycaster.current.intersectObjects(scene.children, true)
-    
-    // Filter out the model itself and find the closest obstacle
-    const filteredIntersects = intersects.filter(hit => {
-      let obj = hit.object
-      // Traverse up to check if this object is part of the model
-      while (obj.parent) {
-        if (obj === modelRef.current) return false
-        obj = obj.parent
+    // Camera collision detection using raycast (only every 3 frames for performance)
+    if (frameCount.current % 3 === 0) {
+      // Cast a ray from the model to the desired camera position
+      const rayDirection = new THREE.Vector3()
+      rayDirection.subVectors(desiredCameraPosition, modelPosition).normalize()
+      const rayDistance = modelPosition.distanceTo(desiredCameraPosition)
+      
+      raycaster.current.set(modelPosition, rayDirection)
+      raycaster.current.far = rayDistance
+      
+      // Get all intersections with scene objects
+      const intersects = raycaster.current.intersectObjects(scene.children, true)
+      
+      // Filter out the model itself and find the closest obstacle
+      const filteredIntersects = intersects.filter(hit => {
+        // Skip if object doesn't have matrixWorld (not fully initialized)
+        if (!hit.object || !hit.object.matrixWorld) return false
+        
+        let obj = hit.object
+        // Traverse up to check if this object is part of the model
+        while (obj.parent) {
+          if (obj === modelRef.current) return false
+          obj = obj.parent
+        }
+        return true
+      })
+      
+      // If there's an obstacle between the model and desired camera position
+      if (filteredIntersects.length > 0) {
+        const closestHit = filteredIntersects[0]
+        // Position camera slightly before the collision point
+        const collisionPoint = closestHit.point
+        const safeDistance = 0.1 // Small offset to prevent clipping into surfaces
+        const adjustedDirection = rayDirection.clone().multiplyScalar(-safeDistance)
+        cameraPosition.current.copy(collisionPoint).add(adjustedDirection)
+        
+        // Adjust camera height proportionally based on distance to model
+        const actualDistance = modelPosition.distanceTo(cameraPosition.current)
+        const desiredDistance = rayDistance
+        const distanceRatio = actualDistance / desiredDistance
+        
+        // Interpolate height between model and desired position
+        const minHeight = modelPosition.y + 0.3 // Minimum height above model
+        const desiredHeight = desiredCameraPosition.y
+        cameraPosition.current.y = THREE.MathUtils.lerp(minHeight, desiredHeight, distanceRatio)
+      } else {
+        // No obstacles, use desired position
+        cameraPosition.current.copy(desiredCameraPosition)
       }
-      return true
-    })
-    
-    // If there's an obstacle between the model and desired camera position
-    if (filteredIntersects.length > 0) {
-      const closestHit = filteredIntersects[0]
-      // Position camera slightly before the collision point
-      const collisionPoint = closestHit.point
-      const safeDistance = 0.1 // Small offset to prevent clipping into surfaces
-      const adjustedDirection = rayDirection.clone().multiplyScalar(-safeDistance)
-      cameraPosition.current.copy(collisionPoint).add(adjustedDirection)
-      
-      // Adjust camera height proportionally based on distance to model
-      const actualDistance = modelPosition.distanceTo(cameraPosition.current)
-      const desiredDistance = rayDistance
-      const distanceRatio = actualDistance / desiredDistance
-      
-      // Interpolate height between model and desired position
-      const minHeight = modelPosition.y + 0.3 // Minimum height above model
-      const desiredHeight = desiredCameraPosition.y
-      cameraPosition.current.y = THREE.MathUtils.lerp(minHeight, desiredHeight, distanceRatio)
-    } else {
-      // No obstacles, use desired position
-      cameraPosition.current.copy(desiredCameraPosition)
     }
     
     // Look-at target (slightly above model center)
@@ -130,14 +141,32 @@ function FollowLight({ modelRef }: { modelRef: ModelRef }) {
       shadow-camera-bottom={-10}
       shadow-camera-near={0.1}
       shadow-camera-far={50}
-      shadow-mapSize-width={4096}
-      shadow-mapSize-height={4096}
-      shadow-radius={4}
+      shadow-mapSize-width={2048}
+      shadow-mapSize-height={2048}
+      shadow-radius={3}
     />
   )
 }
 
-function Scene({ debugMode }: { debugMode: boolean }) {
+function Scene({ 
+  debugMode, 
+  socket, 
+  playerId, 
+  remotePlayers, 
+  playerPositionsRef,
+  isSeeker,
+  onReportFound,
+  gameState 
+}: { 
+  debugMode: boolean;
+  socket: any;
+  playerId: string | null;
+  remotePlayers: any[];
+  playerPositionsRef: any;
+  isSeeker: boolean;
+  onReportFound: (hiderId: string) => void;
+  gameState: any;
+}) {
   const modelRef = useRef<THREE.Group>(null)
   const { camera } = useThree()
   
@@ -159,7 +188,38 @@ function Scene({ debugMode }: { debugMode: boolean }) {
       <Suspense fallback={null}>
         <Physics gravity={[0, -9.81, 0]} debug={debugMode}>
           <CityScene position={[0, 0, 0]} />
-          <Model ref={modelRef} camera={camera} castShadow receiveShadow scale={0.15} position={[-42, 2, 0]} />
+          
+          {/* Local player */}
+          <Model 
+            ref={modelRef} 
+            camera={camera} 
+            castShadow 
+            receiveShadow 
+            scale={0.15} 
+            position={[-42, 2, 0]}
+            socket={socket}
+            playerId={playerId}
+            remotePlayers={remotePlayers}
+            isSeeker={isSeeker}
+            onReportFound={onReportFound}
+            gameState={gameState}
+          />
+          
+          {/* Remote players */}
+          {remotePlayers.map(player => (
+            <RemotePlayer
+              key={player.id}
+              playerId={player.id}
+              playerPositionsRef={playerPositionsRef}
+              initialPosition={player.position}
+              initialRotation={player.rotation}
+              role={player.role}
+              name={player.name}
+              isCaught={player.isCaught}
+              socket={socket}
+              scale={0.15}
+            />
+          ))}
         </Physics>
       </Suspense>
       
@@ -170,7 +230,24 @@ function Scene({ debugMode }: { debugMode: boolean }) {
 }
 
 function App() {
-  const [debugMode, setDebugMode] = useState(true)
+  const [debugMode, setDebugMode] = useState(false)
+  
+  // Multiplayer hook
+  const {
+    socket,
+    connected,
+    playerId,
+    players,
+    remotePlayers,
+    playerPositionsRef,
+    currentPlayer,
+    gameState,
+    scoreboard,
+    isSeeker,
+    toggleReady,
+    reportFound,
+    getTimeRemaining
+  } = useMultiplayer()
   
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -187,14 +264,37 @@ function App() {
     <>
       <Canvas
         camera={{ position: [-42, 3.5, 3], fov: 45 }}
-        shadows="soft"
+        shadows="basic"
+        gl={{ antialias: true, alpha: false }}
+        dpr={[1, 2]}
         style={{
           width: "100vw",
           height: "100vh",
         }}
       >
-        <Scene debugMode={debugMode} />
+        <Scene 
+          debugMode={debugMode}
+          socket={socket}
+          playerId={playerId}
+          remotePlayers={remotePlayers}
+          playerPositionsRef={playerPositionsRef}
+          isSeeker={isSeeker}
+          onReportFound={reportFound}
+          gameState={gameState}
+        />
       </Canvas>
+      
+      {/* Game UI */}
+      <GameUI
+        connected={connected}
+        currentPlayer={currentPlayer || null}
+        players={players}
+        gameState={gameState}
+        scoreboard={scoreboard}
+        isSeeker={isSeeker}
+        onToggleReady={toggleReady}
+        getTimeRemaining={getTimeRemaining}
+      />
       
       {/* Debug mode indicator overlay */}
       {debugMode && (
@@ -226,7 +326,7 @@ function App() {
         borderRadius: '5px',
         fontFamily: 'monospace',
         fontSize: '12px',
-        zIndex: 1000,
+        zIndex: 900,
       }}>
         <div><strong>Controls:</strong></div>
         <div>Arrow Keys: Move</div>

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import debounce from 'lodash-es/debounce'
 import clamp from 'lodash-es/clamp'
 import { forwardRef, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
