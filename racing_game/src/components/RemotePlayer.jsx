@@ -155,7 +155,7 @@ const RemotePlayerComponent = ({
     if (frameVelocity > 3.0) {
       desiredAction = 'run'
     } else if (frameVelocity > 0.3) {
-      desiredAction = 'walk'
+      desiredAction = 'run'
     }
 
     // Switch animation if needed

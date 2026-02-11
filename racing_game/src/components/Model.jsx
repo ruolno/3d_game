@@ -120,9 +120,9 @@ export const Model = forwardRef(({
       let newAnimation = 'idle'
 
       if (isMoving && isShifting) {
-        newAnimation = 'run'
-      } else if (isMoving) {
         newAnimation = 'walk'
+      } else if (isMoving) {
+        newAnimation = 'run'
       }
 
       changeAnimation(newAnimation)
@@ -210,7 +210,7 @@ export const Model = forwardRef(({
 
     if (isMoving) {
       // Determine velocity based on whether running or walking
-      const velocity = key[2] === 1 ? runVelocity : walkVelocity
+      const velocity = key[2] === 1 ? walkVelocity : runVelocity
       
       // Get camera's forward direction (projected onto XZ plane)
       const cameraDirection = new THREE.Vector3()
