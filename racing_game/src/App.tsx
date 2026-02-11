@@ -200,6 +200,7 @@ function Scene({
             socket={socket}
             playerId={playerId}
             remotePlayers={remotePlayers}
+            playerPositionsRef={playerPositionsRef}
             isSeeker={isSeeker}
             onReportFound={onReportFound}
             gameState={gameState}

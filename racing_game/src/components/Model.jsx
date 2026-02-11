@@ -17,6 +17,7 @@ export const Model = forwardRef(({
   socket,
   playerId,
   remotePlayers = [],
+  playerPositionsRef,
   isSeeker = false,
   onReportFound,
   gameState,
@@ -284,17 +285,15 @@ export const Model = forwardRef(({
         const lastCollision = collisionCooldown.current.get(player.id)
         if (lastCollision && now - lastCollision < cooldownDuration) return
         
-        // Calculate distance
-        const otherPosition = new THREE.Vector3(
-          player.position.x,
-          player.position.y,
-          player.position.z
-        )
+        // Read real-time position from shared ref (same source RemotePlayer uses)
+        const liveData = playerPositionsRef?.current?.get(player.id)
+        const pos = liveData?.position ?? player.position
+        
+        const otherPosition = new THREE.Vector3(pos.x, pos.y, pos.z)
         const distance = myPosition.distanceTo(otherPosition)
         
         // Collision threshold (considering scale)
         const collisionThreshold = 0.8 * scale
-        console.log(distance, collisionThreshold)
         if (distance < collisionThreshold) {
           // Found a hider!
           console.log(`Found player: ${player.name}`)
